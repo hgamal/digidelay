@@ -1,5 +1,9 @@
 # Electric Druid Digital Delay DIGIDELAY
 
+Changing firmware from Electric Druid Digital Delay Processor
+
+https://electricdruid.net/product/digidelay-delay-processor-chip/
+
 ## Write and Release
 	pk2cmd -P -F./dist/default/production/digidelay.X.production.hex -M -R
 
