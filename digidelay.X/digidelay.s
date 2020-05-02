@@ -14,6 +14,9 @@
 ; 22 Nov 2016: Rewritten audio code to use block processing and increased
 ; block size to 64 samples. Rewritten filter routines to use 32-bit accumulators
 ; and fraction saving to reduce noise.
+; 05 May 2020: Change tap behavior by Haroldo Gamal. The tap tempo  is computed  
+; every time user press tap temp button. If the time is superior to the maximum
+; time this tap is ignored.
 	
 ; 33FJ dsPIC with on-chip Audio DAC
 	.equ __33FJ64GP802, 1
@@ -487,7 +490,8 @@ __reset:
 	movc	#65535, HP_B1
 	movc	#1, HP_A0
 	movc	#23167, HPS_X		; Shelving parameter
-
+	
+	clr		TAP_TIMER
 
 ;=======================================================
 ;	Done with setup, so start everything up
@@ -894,8 +898,19 @@ ButtonTimerEnded:
 ; and the simple SYNC_OUT pulses
 TempoMarking:	
 	; Is the Tap Tempo timer running?
-	btsc	FLAGS, #TAP_TIMER_ON
-	inc		TAP_TIMER				; Add a block	
+	btst	FLAGS, #TAP_TIMER_ON
+	bra		Z, notap
+
+	inc		TAP_TIMER				; Add a block
+	mov		TAP_TIMER, W0			; check for maximum delay range
+	mov		#2047, W1
+	cp		W0, W1
+	bra		NC, notap
+	
+	clr		TAP_TIMER				; it has taken too much time between taps
+	bclr	FLAGS, #TAP_TIMER_ON	; stop the timer
+		
+notap:
 	; The Sync pulse is a downcounter
 	dec		SYNC_TIMER
 	btsc	SR, #Z					; Have we reached zero?
@@ -1160,37 +1175,18 @@ TestButton1:
 	goto	Button1Released
 Button1Pressed:
 	; Which tap was it?
-	btsc	FLAGS, #SECOND_TAP
+	btsc	FLAGS, #TAP_TIMER_ON
 	goto	SecondTap
-FirstTap:
-	clr		TAP_TIMER				; Clear the counter
+FirstTap:									; First Tap
 	bset	FLAGS, #TAP_TIMER_ON	; Start the tap timer
-	bset	FLAGS, #SECOND_TAP		; Next tap is second tap
 	bset	LATA, #LED1				; Turn the Tempo LED on
+	clr		TAP_TIMER
 	goto	TestButton2
 SecondTap:
-	bclr	FLAGS, #TAP_TIMER_ON	; Stop the timer
-	bclr	FLAGS, #SECOND_TAP		; Next tap is first tap
-	bclr	LATA, #LED1				; Turn the Tempo LED off
-	; Get the new delay length
 	mov		TAP_TIMER, W2
-	; Is the tapped tempo within our bounds? 0-2047
+	clr		TAP_TIMER
 	
-; USE ONE/TWO SRAMS VERSION
-;	mov		#0xFC00, W0
-;	btss	FLAGS, #ONE_SRAM		; Are we only using one SRAM?
-;	mov		#0xF800, W0
-;	and		TAP_TIMER, WREG
-;	mov		#1023, W1
-;	btss	FLAGS, #ONE_SRAM		; Are we only using one SRAM?
-;	mov		#2047, W1
-;	btss	SR, #Z					; If zero, it's within bounds
-;	mov		W1, W2					; Not within bounds, so use maximum
-	
-	mov		#0xF800, W0
-	and		TAP_TIMER, WREG
-	btss	SR, #Z					; If zero, it's within bounds
-	mov		#2047, W2				; Not within bounds, so use maximum
+TapComputed:
 	; Ok, we've got a new (tapped) tempo
 	mov		W2, TEMPO				; Store the new tempo
 	clr		TEMPO_TIMER
@@ -1335,9 +1331,6 @@ ConfigADCForNewChannel:
 	bset	AD1CON1, #SAMP
 	
 TempoPWM:
-	; If the Tap Timer is running, we don't control the LED.
-	btsc	FLAGS, #TAP_TIMER_ON
-	goto	InterruptExit			; Timer is on, skip this
 	; We control the brightness of the Tempo LED using PWM
 	mov		#256, W0				; ~125Hz PWM
 	add		PWM_COUNT
